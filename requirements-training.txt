@@ -1,0 +1,6 @@
+numpy>=1.26
+pandas>=2.2
+torch>=2.6
+lightgbm>=4.5
+transformers>=4.57
+plotly>=5.24
