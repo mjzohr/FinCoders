@@ -1,53 +1,79 @@
-# Stock Forecast Training
+# Stock Forecasting Training Workspace
 
-This workspace now includes a reusable training pipeline for three model families:
+This repository contains a stock forecasting experimentation workspace built around a reusable Python training pipeline. It supports multiple model families, time-based evaluation, experiment tracking, champion model retraining, and live scoring against the latest available data snapshot.
 
-- `lightgbm`: strong tabular baseline on lagged price features and optional news/sentiment features.
-- `lstm`: seminal sequence model with separate price and news encoders.
-- `timexer`: a practical TimeXer-style exogenous transformer with patched price tokens and cross-attention over news features.
+The code is organized under `stock_forecasting/`, with supporting data files in `data/`, generated outputs in `artifacts/`, and analysis notebooks in the repository root.
 
-It also now includes one Hugging Face transformer implementation:
+## Supported Models
 
-- `hf_patchtst`: Hugging Face `PatchTST`, useful when you want an official transformer-based time-series model from the `transformers` library.
+The training pipeline currently supports the following model options:
 
-The default horizons are:
+- `lightgbm`: Gradient-boosted decision tree baseline for structured lagged features.
+- `lstm`: Recurrent neural network with separate price and news feature streams.
+- `timexer`: Transformer-style sequence model for price data with optional exogenous news features.
+- `hf_patchtst`: Hugging Face PatchTST-based time-series model.
 
-- `1` trading day ahead
-- `5` trading days ahead
-- `21` trading days ahead
+## Supported Tasks and Horizons
 
-## Why these three
+- Tasks:
+  - `regression`
+  - `classification`
+- Default forecast horizons:
+  - `1` trading day
+  - `5` trading days
+  - `21` trading days
 
-- Base model: LightGBM is still one of the hardest classical baselines to beat on structured financial features.
-- Seminal model: LSTM remains the canonical sequence model for noisy market time series.
-- SOTA-oriented model: TimeXer is designed for time-series forecasting with exogenous variables, which fits your price + news/sentiment setup.
+The default training configuration is oriented toward regression experiments with walk-forward evaluation.
 
-## Data assumptions
+## Data Inputs
 
-- Price source: `data/dates_on_left_stock_data.csv`
-- Default news source: `data/news_all_sentiment.csv`
-- News is aggregated by ticker and day, then shifted by `--news-lag-days` to reduce leakage when article timestamps are unavailable.
-- Targets are derived directly from future prices, not from the existing label bins, so the same code works for next-day, next-week, and next-month forecasting.
+By default, the workspace expects the following input files:
 
-## Best-practice choices baked in
+- Price data: `data/dates_on_left_stock_data.csv`
+- News and sentiment data: `data/news_all_sentiment.csv`
 
-- Time-based evaluation only. No random shuffling across dates.
-- Walk-forward validation by default.
-- Separate training per horizon.
-- Regression target is forward return; directional metrics are reported alongside regression metrics.
-- Cross-sectional metrics are included:
-  - overall Spearman IC
-  - average daily Spearman IC
-  - top-vs-bottom decile spread
-- Missing news is handled explicitly with zeros and a `has_news` feature.
+When `price_news` mode is used, news features are aggregated by ticker and date, then shifted by `--news-lag-days` to reduce leakage risk when precise article timestamps are not available.
 
-## Install
+## Evaluation Approach
+
+The training pipeline uses time-based splits only. Random shuffling is not used for model evaluation.
+
+Supported evaluation modes:
+
+- `walkforward` (default)
+- `holdout`
+
+For regression runs, the reported metrics include:
+
+- MAE
+- RMSE
+- directional accuracy
+- Spearman information coefficient
+- Pearson correlation
+- mean daily Spearman information coefficient
+- top-bottom decile spread
+
+For classification runs, the reported metrics include:
+
+- accuracy
+- balanced accuracy
+- precision
+- recall
+- F1 score
+
+## Installation
+
+Install the required Python packages with:
 
 ```bash
 pip install -r requirements-training.txt
 ```
 
-## Train one run
+The repository does not currently define a packaged installation step; the command-line examples below assume you are running from the repository root.
+
+## Training a Single Experiment
+
+Examples:
 
 ```bash
 python -m stock_forecasting.train --model lightgbm --modalities price_news --horizon 1
@@ -56,172 +82,142 @@ python -m stock_forecasting.train --model timexer --modalities price_news --hori
 python -m stock_forecasting.train --model hf_patchtst --modalities price_news --horizon 21 --lookback 60
 ```
 
-## Compare all models and horizons
+Useful training arguments include:
+
+- `--model`: `lightgbm`, `lstm`, `timexer`, or `hf_patchtst`
+- `--task`: `regression` or `classification`
+- `--modalities`: `price` or `price_news`
+- `--horizon`: `1`, `5`, or `21`
+- `--lookback`: sequence length used for feature construction
+- `--news-lag-days`: lag applied to aggregated news features
+- `--eval-mode`: `walkforward` or `holdout`
+
+## Running Experiment Grids
+
+To run a Python-managed experiment grid:
 
 ```bash
 python -m stock_forecasting.run_experiments --task regression
 ```
 
-Or use the bash runner:
+This command writes per-run outputs under `artifacts/` and also produces consolidated experiment summaries.
+
+## Shell-Based Training Sweeps
+
+The repository also includes Bash helpers for broader experiment sweeps:
+
+- `run_training_suite.sh`
+- `run_transformer_suite.sh`
+
+Example usage on a Unix-like shell:
 
 ```bash
 bash run_training_suite.sh
-```
-
-Examples:
-
-```bash
-PROFILE=competition bash run_training_suite.sh
 PROFILE=quick bash run_training_suite.sh
-MODELS="lightgbm lstm hf_patchtst" HORIZONS="1 5" bash run_training_suite.sh
-LOOKBACKS="30 60" MODALITIES="price_news" bash run_training_suite.sh
-INSTALL_DEPS=1 bash run_training_suite.sh
-bash run_transformer_suite.sh
-```
-
-The bash runner is now designed for experiment comparison, not just single-pass training. The recommended full run for the evaluation notebooks is:
-
-```bash
-bash run_training_suite.sh
-```
-
-That now defaults to the `competition` profile, which sweeps:
-
-- models: `lightgbm`, `lstm`, `timexer`, `hf_patchtst`
-- horizons: `1`, `5`, `21`
-- modalities: `price`, `price_news`
-- news lags: `1`, `2`
-- seeds: `7`, `19`, `31`
-- evaluation: `walkforward`
-- task: `regression`
-- lookbacks by horizon:
-  - `1` day horizon: `20`, `30`, `60`
-  - `5` day horizon: `30`, `45`, `60`
-  - `21` day horizon: `21`, `42`, `60`
-
-This default sweep is intentionally broad so [compare_results.ipynb](C:/Users/zohrabim/Desktop/Projects/stock/compare_results.ipynb) and [horizon_evaluation_report.ipynb](C:/Users/zohrabim/Desktop/Projects/stock/horizon_evaluation_report.ipynb) have enough diversity to compare:
-
-- short vs medium vs long lookback windows
-- single-modal vs bimodal models
-- sensitivity to news lag assumptions
-- which model family wins at each prediction horizon
-- whether a result stays strong across repeated random seeds
-
-Useful controls:
-
-- `PROFILE=competition`: recommended full sweep for final model selection
-- `PROFILE=quick`: smaller sweep for smoke tests
-- `PROFILE=transformers`: transformer-only sweep with `timexer` and `hf_patchtst`
-- `LOOKBACKS="30 60"`: override all horizon-specific lookbacks
-- `TASKS="regression classification"`: run both tasks, though it is best to compare them separately in the notebook
-- `SEEDS="7 19"`: add repeated runs for stability checks
-- `SKIP_EXISTING=1`: resume a large sweep without retraining runs that already produced `summary.json`
-
-If you want only transformer-based models, use either of these:
-
-```bash
 PROFILE=transformers bash run_training_suite.sh
 bash run_transformer_suite.sh
 ```
 
-The transformer sweep focuses on:
+The default `run_training_suite.sh` profile is `competition`, which expands to a broader sweep across:
 
-- models: `timexer`, `hf_patchtst`
-- modality: `price_news`
-- lookbacks:
-  - `1` day horizon: `30`, `60`
-  - `5` day horizon: `45`, `60`
-  - `21` day horizon: `42`, `60`
+- models
+- horizons
+- modalities
+- news lags
+- seeds
+- horizon-specific lookback windows
 
-## Compare results
+Additional environment variables supported by the script include:
 
-Open [compare_results.ipynb](C:/Users/zohrabim/Desktop/Projects/stock/compare_results.ipynb) after training finishes. It scans `artifacts/`, ranks runs, compares horizons and modalities, and generates presentation-oriented plots and talking points.
+- `MODELS`
+- `HORIZONS`
+- `MODALITIES`
+- `TASKS`
+- `NEWS_LAGS`
+- `SEEDS`
+- `LOOKBACKS`
+- `SKIP_EXISTING`
+- `INSTALL_DEPS`
 
-If you want a decision report split explicitly into daily, weekly, and monthly model selection, open [horizon_evaluation_report.ipynb](C:/Users/zohrabim/Desktop/Projects/stock/horizon_evaluation_report.ipynb). It recommends one model per horizon and shows the evidence for why it was chosen.
+On Windows, the Python module entry points are the more portable option unless you are running these scripts inside a Bash-compatible environment.
 
-Both notebooks now include Plotly-based stock-history charts for 5 randomly selected tickers from the evaluated run. They show:
+## Experiment Artifacts
 
-- the historical stock price series
-- the actual test-period price path
-- the predicted price path
-
-They also now include an additional candlestick-style view. Because the dataset contains closing prices rather than full intraday OHLC data, those candles are explicitly close-derived rather than true market OHLC candles.
-
-The chart frequency follows the trained model horizon:
-
-- daily for `horizon = 1`
-- weekly-style aggregation for `horizon = 5`
-- monthly-style aggregation for `horizon = 21`
-
-## Save artifacts during experiments
-
-Each experiment directory now saves:
+Each experiment run is written to its own directory under `artifacts/`. Depending on model type, outputs include:
 
 - `config.json`
 - `feature_metadata.json`
 - `summary.csv`
 - `summary.json`
 - per-fold `test_predictions.csv`
-- per-fold model files:
-  - LightGBM: `model.txt`
-  - neural models: `model.pt` and `standardizer.npz`
+- model files:
+  - `model.txt` for LightGBM
+  - `model.pt` and `standardizer.npz` for neural models
 
-## Train a champion model
+The run naming convention is derived from model, horizon, modality, task, lookback, news lag, evaluation mode, and seed.
 
-After reviewing experiments, retrain one selected configuration into a single deployable artifact under `champions/`.
+## Champion Model Retraining
 
-Choose a specific run:
+After reviewing experiment results, you can retrain a selected configuration into a deployable artifact under `champions/`.
+
+Examples:
 
 ```bash
 python -m stock_forecasting.train_champion --run-name lightgbm_h1_price_news_regression_lb30_lag1_walkforward_s7
-```
-
-Or automatically pick the best completed run for a task:
-
-```bash
 python -m stock_forecasting.train_champion --task regression
 ```
 
-Champion artifacts save:
+Champion artifacts include:
 
 - `config.json`
 - `feature_metadata.json`
 - `selection.json`
 - `champion_summary.json`
 - `validation_predictions.csv`
-- model file:
-  - LightGBM: `model.txt`
-  - neural models: `model.pt` and `standardizer.npz`
+- model file outputs appropriate to the selected model family
 
-## Score fresh daily data
+## Live Scoring
 
-Use a saved champion artifact to score the latest available snapshot in your `data/` files:
+Use a saved champion artifact to score the latest available data snapshot:
 
 ```bash
 python -m stock_forecasting.predict_live --artifact-dir champions/YOUR_CHAMPION_NAME
 ```
 
-Optional scoring date override:
+Optional date override:
 
 ```bash
 python -m stock_forecasting.predict_live --artifact-dir champions/YOUR_CHAMPION_NAME --as-of-date 2024-11-20
 ```
 
-The live scoring script writes a ranked CSV like `live_predictions_YYYY-MM-DD.csv` inside the champion directory.
+The scoring command writes a ranked CSV file inside the selected champion directory by default.
 
-## Single-modal vs bimodal
+## Notebooks
 
-- Single-modal: `--modalities price`
-- Bimodal: `--modalities price_news`
+The repository includes analysis notebooks in the project root, including:
 
-## Recommended starting points
+- `compare_results.ipynb`
+- `horizon_evaluation_report.ipynb`
 
-- Next day: `lightgbm` and `lstm`
-- Next week: `lightgbm`, `lstm`, `timexer`, and `hf_patchtst`
-- Next month: `timexer` or `hf_patchtst` with a longer lookback such as `--lookback 60`
+These notebooks are intended for post-training comparison and reporting based on the contents of `artifacts/`.
+
+## Repository Structure
+
+```text
+FinCoders/
+|-- artifacts/
+|-- data/
+|-- stock_forecasting/
+|-- compare_results.ipynb
+|-- horizon_evaluation_report.ipynb
+|-- requirements-training.txt
+|-- run_training_suite.sh
+|-- run_transformer_suite.sh
+`-- README.md
+```
 
 ## Notes
 
-- The current implementation uses aggregated news and sentiment features rather than a heavy raw-text encoder.
-- If you later want full text embeddings, the cleanest extension is to precompute article embeddings and add them as extra exogenous features.
-- `hf_patchtst` uses the official Hugging Face PatchTST implementation and concatenates price/news features along the channel dimension.
+- The current implementation uses aggregated news and sentiment features rather than raw-text language model embeddings.
+- GPU execution is supported when `torch` detects CUDA and `--device cuda` is used; otherwise training falls back to CPU.
+- The default command-line device setting is `cuda`, but the training code automatically uses CPU when CUDA is unavailable.
